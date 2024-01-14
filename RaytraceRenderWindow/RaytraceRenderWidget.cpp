@@ -39,6 +39,7 @@ RaytraceRenderWidget::RaytraceRenderWidget
         QTimer *timer = new QTimer(this);
         connect(timer, &QTimer::timeout, this, &RaytraceRenderWidget::forceRepaint);
         timer->start(30);
+        scene = new Scene(newTexturedObject, newRenderParameters);
     } // constructor
 
 
@@ -132,12 +133,17 @@ void RaytraceRenderWidget::Raytrace(){
 }
 
 void RaytraceRenderWidget::RaytraceThread(){
+    scene->updateScene();
     frameBuffer.clear(RGBAValue(0.0f, 0.0f, 0.0f, 1.0f));
 
     #pragma omp parallel for schedule(dynamic)
     for(int j = 0; j < frameBuffer.height; j++){
         for(int i = 0; i < frameBuffer.width; i++){
-            Homogeneous4 color(i/float(frameBuffer.height), j/float(frameBuffer.width),0);
+            Ray ray = calculateRay(i, j, !renderParameters->orthoProjection);
+
+            //Homogeneous4 color(i/float(frameBuffer.height), j/float(frameBuffer.width),0);
+            auto color = traceAndShadeWithRay(ray, N_BOUNCES);
+
 
 
 
@@ -157,3 +163,157 @@ void RaytraceRenderWidget::RaytraceThread(){
 void RaytraceRenderWidget::forceRepaint(){
     update();
 }
+
+Ray RaytraceRenderWidget::calculateRay(int pixelx, int pixely, bool perspective){
+    // Convert pixel coordinates to normalized device coordinates (NDC)
+    float ndcX = (float(2.0) * pixelx / frameBuffer.width - float(1.0));
+    float ndcY = (float(2.0) * pixely / frameBuffer.height - float(1.0));
+
+    // Calculate aspect ratio
+    float aspect = float(1.0) * frameBuffer.width / frameBuffer.height;
+
+    float viewX, viewY;
+
+    // Adjust aspect ratio
+    if (aspect > 1)
+    {
+        viewX = ndcX * aspect;
+        viewY = ndcY;
+    }
+    else
+    {
+        viewX = ndcX;
+        viewY = ndcY / aspect;
+    }
+
+    // Define rays based on orthogonal or perspective projection
+    // perspective projection
+    if (perspective)
+    {
+        // Map 2D coordinates to points on the image plane
+        Cartesian3 positionOnImage(viewX, viewY, 0);
+
+        // Defines the starting point of the ray at (0, 0, 1), directed towards the image plane
+        Cartesian3 rayOrigin(0, 0, 1);
+        Cartesian3 direction = (positionOnImage - rayOrigin).unit();
+
+        Ray perspectiveRay(rayOrigin, direction);
+        return perspectiveRay;
+    }
+    // Orthographic projection
+    else
+    {
+        Cartesian3 rayOrigin(viewX, viewY, 0);
+        Cartesian3 direction(0, 0, -1);
+        Ray orthoRay(rayOrigin, direction);
+        return orthoRay;
+    }
+}
+
+Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth)
+{
+    Homogeneous4 color(0, 0, 0, 0);
+
+    if (depth == 0)
+    {
+        return color;
+    }
+
+    // Try to find triangles in the scene where rays collide
+    auto collisionInfo = scene->closestTriangle(ray);
+
+    // A collision occurs!!!
+    if (collisionInfo.Valid())
+    {
+        auto collisionPoint = collisionInfo.CollisionPoint;
+        auto triangle = collisionInfo.tri;
+        auto bc = triangle.Baricentric(collisionPoint);
+        auto normOut = (bc.x * triangle.normals[0] + bc.y * triangle.normals[1] + bc.z * triangle.normals[2]).Vector().unit();
+
+        // Recursive ray tracing
+        // Get material properties
+        auto reflectivity = triangle.shared_material->reflectivity;
+        auto currentIOR = triangle.shared_material->indexOfRefraction;
+        auto transparency = triangle.shared_material->transparency;
+
+        // interpolation rendering
+        if (renderParameters->interpolationRendering)
+        {
+            color = Homogeneous4(abs(normOut.x), abs(normOut.y), abs(normOut.z), 1);
+        }
+        // Blinn-Phong lighting model
+        else if (renderParameters->phongEnabled)
+        {
+
+            color = Homogeneous4(0.0, 0.0, 0.0, 1.0);
+            for (const auto& light : renderParameters->lights)
+            {
+                // Apply model view matrix
+                auto lightPosition = scene->getModelView() * light->GetPositionCenter();
+
+                // Calculate shadow effectiveness
+                bool shadowValid = renderParameters->shadowsEnabled && calculateShadowValidity(triangle, collisionPoint, lightPosition);
+
+                // Calculate Blinn-Phong lighting
+                color = color + triangle.CalculateBlinnPhong(lightPosition, light->GetColor(), bc, shadowValid);
+            }
+            if(reflectivity > float(0.0) && renderParameters->reflectionEnabled){
+                Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
+
+
+                return reflectivity * traceAndShadeWithRay(mirrorRay, depth-1) + (1 - reflectivity) * color;
+            }
+
+
+        }
+        else
+        {
+            // interpolated color
+            color = bc.x * triangle.colors[0] + bc.y * triangle.colors[1] + bc.z * triangle.colors[2];
+        }
+    }
+
+    return color;
+}
+
+bool RaytraceRenderWidget::calculateShadowValidity(const Triangle& triangle, const Cartesian3& collisionPoint, const Homogeneous4& lightPosition)
+{
+    // Compute shadow rays
+    auto collisionPointNormal = triangle.normals[0].Vector();//Get the normals of a triangle
+    // avoid shadow acne
+    auto shadowRayOrigin = collisionPoint + 1e-4 * collisionPointNormal;// Calculate the starting point of the shadow ray, slightly offset from the collision point along the normal direction
+    auto shadowRayDirection = (lightPosition.Point() - shadowRayOrigin).unit();// Calculate the direction of the shadow ray, pointing to the light source position
+    Ray shadowRay(shadowRayOrigin, shadowRayDirection);// Create shadow ray
+
+    //Try to find the object in the scene that the light collides with
+    Scene::CollisionInfo shadowCollisionInfo = scene->closestTriangle(shadowRay);
+
+    if (shadowCollisionInfo.Valid())
+    {
+        // Check if the shadow is valid.
+        auto shadow2Collision = shadowCollisionInfo.CollisionPoint - collisionPoint;
+        auto collision2Light = lightPosition.Point() - shadowCollisionInfo.CollisionPoint;
+
+        // Shadows have no effect if the collision point is a light source
+        if (collision2Light.length() < 1e-6 || shadow2Collision.length() < 1e-6)
+        {
+            return false;
+        }
+
+        // If the vector from shadowRayOrigin to shadowHitPoint is equal to
+        // The vectors from shadowHitPoint to lightPosition have the same direction
+        // then it is a valid shadow
+        return shadow2Collision.dot(collision2Light) > 0;
+    }
+
+    return true;
+}
+
+
+Ray RaytraceRenderWidget::reflectRay(Ray &ray, Cartesian3 &normOut, Cartesian3 collisionPoint){
+    auto reflectDirection = (ray.direction - 2 * (ray.direction.dot(normOut)) * normOut).unit();
+    Ray reflectedRay(collisionPoint, reflectDirection);
+    return reflectedRay;
+
+}
+

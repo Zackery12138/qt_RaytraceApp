@@ -3,6 +3,8 @@
 
 #include "Homogeneous4.h"
 #include "Material.h"
+#include "Ray.h"
+
 class Triangle
 {
 public:
@@ -16,6 +18,9 @@ public:
 
     Triangle();
 
+    float intersect(Ray r);
+    Cartesian3 Baricentric(Cartesian3 o);
+    Homogeneous4 CalculateBlinnPhong(Homogeneous4 lightPosition, Homogeneous4 lightColor, Cartesian3 bc, bool shadow);
 };
 
 #endif // TRIANGLE_H

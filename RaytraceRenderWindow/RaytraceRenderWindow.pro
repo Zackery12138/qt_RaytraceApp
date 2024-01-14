@@ -32,6 +32,7 @@ HEADERS += ArcBall.h \
            Material.h \
            Matrix4.h \
            Quaternion.h \
+           Ray.h \
            RaytraceRenderWidget.h \
            RenderController.h \
            RenderParameters.h \
@@ -39,18 +40,20 @@ HEADERS += ArcBall.h \
            RenderWindow.h \
            RGBAImage.h \
            RGBAValue.h \
+           Scene.h \
            ThreeDModel.h \
-           ray.h \
-           scene.h \
-           triangle.h
+           Triangle.h
 SOURCES += ArcBall.cpp \
            ArcBallWidget.cpp \
            Cartesian3.cpp \
            Homogeneous4.cpp \
            Light.cpp \
            Material.cpp \
+           Ray.cpp \
            Renderparameters.cpp \
+           Scene.cpp \
            ThreeDModel.cpp \
+           Triangle.cpp \
            main.cpp \
            Matrix4.cpp \
            Quaternion.cpp \
@@ -59,7 +62,4 @@ SOURCES += ArcBall.cpp \
            RenderWidget.cpp \
            RenderWindow.cpp \
            RGBAImage.cpp \
-           RGBAValue.cpp \
-           ray.cpp \
-           scene.cpp \
-           triangle.cpp
+           RGBAValue.cpp

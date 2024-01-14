@@ -30,6 +30,8 @@
 // and include all of our own headers that we need
 #include "ThreeDModel.h"
 #include "RenderParameters.h"
+#include "Scene.h"
+#include "Ray.h"
 
 // class for a render widget with arcball linked to an external arcball widget
 class RaytraceRenderWidget : public QOpenGLWidget										
@@ -46,6 +48,8 @@ class RaytraceRenderWidget : public QOpenGLWidget
 	RGBAImage frameBuffer;
 
     std::thread raytracingThread;
+
+    Scene *scene;
 
 
 	public:
@@ -78,6 +82,11 @@ class RaytraceRenderWidget : public QOpenGLWidget
 
     void forceRepaint();
 
+    Homogeneous4 traceAndShadeWithRay(Ray ray, int depth);
+    bool calculateShadowValidity(const Triangle& triangle, const Cartesian3& collisionPoint, const Homogeneous4& lightPosition);
+
+    Ray reflectRay(Ray& ray, Cartesian3& normOut, Cartesian3 collisionPoint);
+
 
 	
 	// mouse-handling
@@ -86,6 +95,9 @@ class RaytraceRenderWidget : public QOpenGLWidget
 	virtual void mouseReleaseEvent(QMouseEvent *event);
 
     private:
+
+    Ray calculateRay(int pixelx, int pixely, bool perspective);
+
 
 	signals:
 	// these are general purpose signals, which scale the drag to 

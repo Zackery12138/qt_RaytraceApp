@@ -1,4 +1,4 @@
-#include "scene.h"
+#include "Scene.h"
 
 
 Scene::Scene(std::vector<ThreeDModel> *texobjs,RenderParameters *renderp)
@@ -30,7 +30,7 @@ void Scene::updateScene(){
                                              obj.vertices[obj.faceVertices[face][faceVertex]].y,
                                              obj.vertices[obj.faceVertices[face][faceVertex]].z);
 
-                    //v = getModelView() * v;
+                    v = getModelView() * v;
                     t.verts[vertex] = v;
 
                     Homogeneous4 n = Homogeneous4(obj.normals[obj.faceNormals[face][faceVertex]].x,
@@ -38,7 +38,7 @@ void Scene::updateScene(){
                                              obj.normals[obj.faceNormals[face][faceVertex]].z,
                                              0.0f);
 
-                    // n = getModelView() * n;
+                    n = getModelView() * n;
                     t.normals[vertex] = n;
                     Cartesian3 tex = Cartesian3(obj.textureCoords[obj.faceTexCoords[face][faceVertex]].x,
                                            obj.textureCoords[obj.faceTexCoords[face][faceVertex]].y,
@@ -56,4 +56,41 @@ void Scene::updateScene(){
             }
         }
     }
+}
+
+
+Matrix4 Scene::getModelView(){
+    Matrix4 modelMatrix;
+    modelMatrix.SetIdentity();
+
+    Matrix4 viewMatrix;
+    viewMatrix.SetIdentity();
+    viewMatrix.SetTranslation({rp->xTranslate, rp->yTranslate, rp->zTranslate});
+    viewMatrix = rp->rotationMatrix * viewMatrix;
+
+    Matrix4 modelViewMatrix = viewMatrix * modelMatrix;
+    return modelViewMatrix;
+}
+
+//Ray and triangle intersection detection
+Scene::CollisionInfo Scene::closestTriangle(Ray r)
+{
+    //ci: closest triangle collision info
+    Scene::CollisionInfo ci;
+    ci.t = FLT_MAX;
+
+    for (int i =0; i < triangles.size(); i++)
+    {
+        auto triangle = triangles[i];
+        auto t = triangle.intersect(r);
+
+        // Update a valid and min time
+        if (t > float(1e-6) && t < ci.t)
+        {
+            ci.t = t;
+            ci.tri = triangle;
+            ci.CollisionPoint = r.origin + r.direction * ci.t;
+        }
+    }
+    return ci;
 }
