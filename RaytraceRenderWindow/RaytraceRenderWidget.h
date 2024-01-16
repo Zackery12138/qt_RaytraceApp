@@ -82,10 +82,11 @@ class RaytraceRenderWidget : public QOpenGLWidget
 
     void forceRepaint();
 
-    Homogeneous4 traceAndShadeWithRay(Ray ray, int depth);
+    Homogeneous4 traceAndShadeWithRay(Ray ray, int depth, float curIor);
     bool calculateShadowValidity(const Triangle& triangle, const Cartesian3& collisionPoint, const Homogeneous4& lightPosition);
 
     Ray reflectRay(Ray& ray, Cartesian3& normOut, Cartesian3 collisionPoint);
+    Ray refractRay(Ray& ray, Cartesian3 normOut, Cartesian3 collisionPoint,  float inIOR, float outIOR);
 
 
 	
@@ -97,6 +98,9 @@ class RaytraceRenderWidget : public QOpenGLWidget
     private:
 
     Ray calculateRay(int pixelx, int pixely, bool perspective);
+    float fresnel_schilick(float cosTheta, float ior1, float ior2);
+
+
 
 
 	signals:

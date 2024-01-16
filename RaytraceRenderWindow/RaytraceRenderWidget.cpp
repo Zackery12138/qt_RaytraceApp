@@ -142,7 +142,7 @@ void RaytraceRenderWidget::RaytraceThread(){
             Ray ray = calculateRay(i, j, !renderParameters->orthoProjection);
 
             //Homogeneous4 color(i/float(frameBuffer.height), j/float(frameBuffer.width),0);
-            auto color = traceAndShadeWithRay(ray, N_BOUNCES);
+            auto color = traceAndShadeWithRay(ray, N_BOUNCES,1.0f);
 
 
 
@@ -210,7 +210,7 @@ Ray RaytraceRenderWidget::calculateRay(int pixelx, int pixely, bool perspective)
     }
 }
 
-Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth)
+Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, float curIor)
 {
     Homogeneous4 color(0, 0, 0, 0);
 
@@ -233,7 +233,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth)
         // Recursive ray tracing
         // Get material properties
         auto reflectivity = triangle.shared_material->reflectivity;
-        auto currentIOR = triangle.shared_material->indexOfRefraction;
+        auto surfaceIOR = triangle.shared_material->indexOfRefraction;
         auto transparency = triangle.shared_material->transparency;
 
         // interpolation rendering
@@ -257,11 +257,31 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth)
                 // Calculate Blinn-Phong lighting
                 color = color + triangle.CalculateBlinnPhong(lightPosition, light->GetColor(), bc, shadowValid);
             }
+            //reflection
             if(reflectivity > float(0.0) && renderParameters->reflectionEnabled){
                 Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
 
 
-                return reflectivity * traceAndShadeWithRay(mirrorRay, depth-1) + (1 - reflectivity) * color;
+                return reflectivity * traceAndShadeWithRay(mirrorRay, depth-1, curIor) + (1 - reflectivity) * color;
+            }
+            //refraction
+            if(transparency > float(0.0) && renderParameters->refractionEnabled){
+                Ray refractedRay = refractRay(ray, normOut, collisionPoint, curIor, surfaceIOR);
+
+                return traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
+            }
+
+            // Fresnel effect
+            if(reflectivity > float(0.0) && transparency > float(0.0) && renderParameters-> fresnelRendering){
+                float cosTheta = ray.direction.unit().dot(normOut);
+
+                float rTheta = fresnel_schilick(cosTheta, curIor, surfaceIOR);
+                float updatedReflectivity = reflectivity * rTheta;
+                float updatedReTransparency = transparency * (1 - rTheta);
+                Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
+                color = color + updatedReflectivity * traceAndShadeWithRay(mirrorRay, depth - 1, curIor);
+                Ray refractedRay = refractRay(ray, normOut, collisionPoint, curIor, surfaceIOR);
+                color = color + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
             }
 
 
@@ -311,9 +331,46 @@ bool RaytraceRenderWidget::calculateShadowValidity(const Triangle& triangle, con
 
 
 Ray RaytraceRenderWidget::reflectRay(Ray &ray, Cartesian3 &normOut, Cartesian3 collisionPoint){
+    //calculate the reflected ray's direction
     auto reflectDirection = (ray.direction - 2 * (ray.direction.dot(normOut)) * normOut).unit();
+    //construct the reflected ray
     Ray reflectedRay(collisionPoint, reflectDirection);
     return reflectedRay;
 
+}
+Ray RaytraceRenderWidget::refractRay(Ray &ray, Cartesian3 normOut, Cartesian3 collisionPoint, float inIOR, float outIOR){
+    float cosi = ray.direction.unit().dot(normOut);
+    float etai = inIOR, etat = outIOR;
+    Cartesian3 n = normOut;
+    Cartesian3 refractedDirection;
+    if(cosi < 0){
+        cosi = -cosi;
+    }else {
+        // Light exits from the inside, swapping the refractive index, flipping the normal.
+        std::swap(etai, etat);
+        n = Cartesian3(-normOut.x, -normOut.y, -normOut.z);
+    }
+    float eta = etai / etat;
+    float k = 1 - eta * eta * (1 - cosi * cosi);
+    if(k < 0){
+        //total internal reflection
+        return reflectRay(ray, n, collisionPoint);
+        //std::cout << "total internal reflection , we do nothing cuttently"<<std::endl;
+    }
+    refractedDirection = (eta * ray.direction.unit() + (eta * cosi - std::sqrt(k)) * n).unit();
+
+    Ray refractedRay(collisionPoint, refractedDirection);
+    return refractedRay;
+
+
+}
+
+
+
+float RaytraceRenderWidget::fresnel_schilick(float cosTheta, float ior1, float ior2){
+    float r0 = (ior1 - ior2) / (ior1 + ior2);
+    r0 = r0 * r0;
+    float rTheta = r0 + (float(1.0) - r0) * float(pow((float(1.0) - cosTheta), 5));
+    return rTheta;
 }
 
