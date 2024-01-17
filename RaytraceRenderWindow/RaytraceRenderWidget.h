@@ -87,7 +87,8 @@ class RaytraceRenderWidget : public QOpenGLWidget
 
     Ray reflectRay(Ray& ray, Cartesian3& normOut, Cartesian3 collisionPoint);
     Ray refractRay(Ray& ray, Cartesian3 normOut, Cartesian3 collisionPoint,  float inIOR, float outIOR);
-
+    Homogeneous4 indirectLighting(Ray ray, Cartesian3 ambient);
+    Cartesian3 sampleHemisphereDirection(const Cartesian3 &normal);
 
 	
 	// mouse-handling

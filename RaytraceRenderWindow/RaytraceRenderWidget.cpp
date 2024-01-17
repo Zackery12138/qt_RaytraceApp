@@ -16,6 +16,8 @@
 #define N_LOOPS 100
 #define N_BOUNCES 5
 #define TERMINATION_FACTOR 0.35f
+#define PI 3.141592653589793f
+#define N_SAMPLES 1
 
 // constructor
 RaytraceRenderWidget::RaytraceRenderWidget
@@ -246,6 +248,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
         {
 
             color = Homogeneous4(0.0, 0.0, 0.0, 1.0);
+
             for (const auto& light : renderParameters->lights)
             {
                 // Apply model view matrix
@@ -258,32 +261,34 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
                 color = color + triangle.CalculateBlinnPhong(lightPosition, light->GetColor(), bc, shadowValid);
             }
             //reflection
-            if(reflectivity > float(0.0) && renderParameters->reflectionEnabled){
+            if(reflectivity > 0.0f && renderParameters->reflectionEnabled){
                 Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
-
 
                 return reflectivity * traceAndShadeWithRay(mirrorRay, depth-1, curIor) + (1 - reflectivity) * color;
             }
+
             //refraction
-            if(transparency > float(0.0) && renderParameters->refractionEnabled){
+            if(transparency > 0.0f && renderParameters->refractionEnabled){
                 Ray refractedRay = refractRay(ray, normOut, collisionPoint, curIor, surfaceIOR);
 
-                return traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
+                return traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR) + (1 - transparency) * color;
             }
 
             // Fresnel effect
-            if(reflectivity > float(0.0) && transparency > float(0.0) && renderParameters-> fresnelRendering){
-                float cosTheta = ray.direction.unit().dot(normOut);
+            if(reflectivity > 0.0f && transparency > 0.0f && renderParameters-> fresnelRendering){
+                float cosTheta = std::fabs(ray.direction.unit().dot(normOut));
 
                 float rTheta = fresnel_schilick(cosTheta, curIor, surfaceIOR);
                 float updatedReflectivity = reflectivity * rTheta;
                 float updatedReTransparency = transparency * (1 - rTheta);
                 Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
-                color = color + updatedReflectivity * traceAndShadeWithRay(mirrorRay, depth - 1, curIor);
+                //color = color + updatedReflectivity * traceAndShadeWithRay(mirrorRay, depth - 1, curIor);
                 Ray refractedRay = refractRay(ray, normOut, collisionPoint, curIor, surfaceIOR);
-                color = color + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
+                //color = color + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
+                return  updatedReflectivity *1.0f * traceAndShadeWithRay(mirrorRay, depth - 1, curIor) + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
             }
-
+            //add the indirectLighting
+            color = color + indirectLighting(ray, triangle.shared_material->ambient);
 
         }
         else
@@ -301,7 +306,7 @@ bool RaytraceRenderWidget::calculateShadowValidity(const Triangle& triangle, con
     // Compute shadow rays
     auto collisionPointNormal = triangle.normals[0].Vector();//Get the normals of a triangle
     // avoid shadow acne
-    auto shadowRayOrigin = collisionPoint + 1e-4 * collisionPointNormal;// Calculate the starting point of the shadow ray, slightly offset from the collision point along the normal direction
+    auto shadowRayOrigin = collisionPoint + 1e-4f * collisionPointNormal;// Calculate the starting point of the shadow ray, slightly offset from the collision point along the normal direction
     auto shadowRayDirection = (lightPosition.Point() - shadowRayOrigin).unit();// Calculate the direction of the shadow ray, pointing to the light source position
     Ray shadowRay(shadowRayOrigin, shadowRayDirection);// Create shadow ray
 
@@ -315,7 +320,7 @@ bool RaytraceRenderWidget::calculateShadowValidity(const Triangle& triangle, con
         auto collision2Light = lightPosition.Point() - shadowCollisionInfo.CollisionPoint;
 
         // Shadows have no effect if the collision point is a light source
-        if (collision2Light.length() < 1e-6 || shadow2Collision.length() < 1e-6)
+        if (collision2Light.length() < 1e-6f || shadow2Collision.length() < 1e-6f)
         {
             return false;
         }
@@ -370,7 +375,44 @@ Ray RaytraceRenderWidget::refractRay(Ray &ray, Cartesian3 normOut, Cartesian3 co
 float RaytraceRenderWidget::fresnel_schilick(float cosTheta, float ior1, float ior2){
     float r0 = (ior1 - ior2) / (ior1 + ior2);
     r0 = r0 * r0;
-    float rTheta = r0 + (float(1.0) - r0) * float(pow((float(1.0) - cosTheta), 5));
+    float rTheta = r0 + (1.0f - r0) * powf((1.0f - cosTheta), 5.0);
     return rTheta;
+}
+
+
+Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 &normal)
+{
+    float u = float((rand()) / static_cast <float> (RAND_MAX));  // Random value between [0, 1]
+    float v = float((rand()) / static_cast <float> (RAND_MAX));  // Random value between [0, 1]
+
+    float theta = 2.0f * PI * u;
+    float phi = acos(2.0f * v - 1.0f);
+
+    // Spherical to Cartesian conversion
+    Cartesian3 direction(
+        sin(phi) * cos(theta),
+        sin(phi) * sin(theta),
+        cos(phi)
+    );
+
+    // Rotate the direction vector so that the z-axis aligns with the normal
+    if (normal.z < 0.99999f) {
+        Cartesian3 axis = normal.cross(Cartesian3(0, 0, 1)).unit();
+        float angle = acos(normal.dot(Cartesian3(0, 0, 1)));
+        Matrix4 rotMat4;
+        rotMat4.SetRotation(axis,angle);
+        direction = rotMat4 * direction;
+    }
+
+    return direction;
+}
+
+Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 ambient){
+    //MonteCarlo sampling for ther indirect lighting
+   /* Homogeneous4 ret;
+    for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
+        Ray mcRay = Sa
+    }*/
+    return ambient;
 }
 

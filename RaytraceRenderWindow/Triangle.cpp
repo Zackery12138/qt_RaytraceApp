@@ -80,12 +80,11 @@ Cartesian3 Triangle::Baricentric(Cartesian3 o){
 Homogeneous4 Triangle::CalculateBlinnPhong(Homogeneous4 lightPosition, Homogeneous4 lightColor, Cartesian3 bc, bool shadow)
 {
     // Get material properties from MTL file
-    Homogeneous4 ambientColor = shared_material->ambient;  // ambient light color
     Homogeneous4 emissiveColor = shared_material->emissive;  // Self-illuminating color
 
     // If in shadow, return result early
     if (shadow)
-        return ambientColor + emissiveColor;
+        return emissiveColor;
 
     // Get material properties from MTL file
     Homogeneous4 diffuseColor = shared_material->diffuse;  // Diffuse light color
@@ -125,10 +124,8 @@ Homogeneous4 Triangle::CalculateBlinnPhong(Homogeneous4 lightPosition, Homogeneo
 
 
     Homogeneous4 resultColor = lightColor.modulate(diffuseIntensity * diffuseColor) * attenuation +
-                                   lightColor.modulate(specularIntensity * specularColor) * attenuation +
-                                    ambientColor * attenuation + emissiveColor;
+                                   lightColor.modulate(specularIntensity * specularColor) * attenuation + emissiveColor;
 
-    //resultColor =  ambientColor;
     return resultColor;
 }
 
