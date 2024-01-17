@@ -130,35 +130,58 @@ void RaytraceRenderWidget::paintGL()
 
 
 void RaytraceRenderWidget::Raytrace(){
+    frameBuffer.clear(RGBAValue(0.0f, 0.0f, 0.0f, 1.0f));
     raytracingThread = std::thread(&RaytraceRenderWidget::RaytraceThread, this);
     raytracingThread.detach();
 }
 
 void RaytraceRenderWidget::RaytraceThread(){
     scene->updateScene();
-    frameBuffer.clear(RGBAValue(0.0f, 0.0f, 0.0f, 1.0f));
-
-    #pragma omp parallel for schedule(dynamic)
-    for(int j = 0; j < frameBuffer.height; j++){
-        for(int i = 0; i < frameBuffer.width; i++){
-            Ray ray = calculateRay(i, j, !renderParameters->orthoProjection);
-
-            //Homogeneous4 color(i/float(frameBuffer.height), j/float(frameBuffer.width),0);
-            auto color = traceAndShadeWithRay(ray, N_BOUNCES,1.0f);
 
 
+    int loops = renderParameters->monteCarloEnabled? N_LOOPS : 1;
+    if(renderParameters->monteCarloEnabled)
+        std::cout << " Doing monteCarlo, I will do " <<loops << " loops" << std::endl;
+
+    for(int loop = 0; loop < loops; loop++){
+        #pragma omp parallel for schedule(dynamic)
+        for(int j = 0; j < frameBuffer.height; j++){
+            for(int i = 0; i < frameBuffer.width; i++){
+
+                //The anti-aliasing feature with each primary ray being sent through a random position inside the pixel is built in the function.
+                Ray ray = calculateRay(i, j, !renderParameters->orthoProjection);
+
+                //Homogeneous4 color(i/float(frameBuffer.height), j/float(frameBuffer.width),0);
+                auto color = traceAndShadeWithRay(ray, N_BOUNCES,1.0f);
 
 
-            //Gamma correction...
-            float gamma = 2.2f;
-            //We already calculate everything in float, so we just do gamma correction
-            //before putting it interger format;
-            color.x = pow(color.x, 1/gamma);
-            color.y = pow(color.y, 1/gamma);
-            color.z = pow(color.z, 1/gamma);
-            frameBuffer[j][i] = RGBAValue(color.x * 255.0f, color.y * 255.0f, color.z * 255.0f, 255.0f);
+
+
+
+
+                //Gamma correction...
+                float gamma = 2.2f;
+
+                //We already calculate everything in float, so we just do gamma correction
+                //before putting it interger format;
+
+                // In the context of path tracing (when LOOP > 1), this code gradually accumulates color for a pixel.
+                //It adjusts the color components (red, green, and blue) and combines them with the existing color
+                //in the frame buffer. This gradual accumulation helps to achieve smoother and more accurate rendering
+                //results over multiple iterations of the loop.
+                color.x = pow(color.x,1/gamma)/float(loop+1);
+                color.y = pow(color.y,1/gamma)/float(loop+1);
+                color.z = pow(color.z,1/gamma)/float(loop+1);
+                frameBuffer[j][i] = ((loop)/float(loop+1))*frameBuffer[j][i]+  RGBAValue(color.x*255.0f,color.y*255.0f,color.z*255.0f,255.0f);
+                frameBuffer[j][i].alpha = 255;
+            }
         }
+
+         if(renderParameters->monteCarloEnabled)
+             std::cout << " Done loop number[" << loop << "] " << std::endl;
     }
+
+
     std::cout << "Done!" << std::endl;
 }
 
@@ -167,12 +190,21 @@ void RaytraceRenderWidget::forceRepaint(){
 }
 
 Ray RaytraceRenderWidget::calculateRay(int pixelx, int pixely, bool perspective){
+
+    //anti-aliasing
+
+    //If path tracing is enabled then rays are emitted from a random position within the pixel, otherwise we shoot the ray from the center.
+    //This randomness is achieved by generating random values for 'dx' and 'dy' between 0 and 1 using 'rand()' and normalizing them.
+    float dx = renderParameters->monteCarloEnabled ? float(rand()) / RAND_MAX : 0.5f;
+    float dy = renderParameters->monteCarloEnabled ? float(rand()) / RAND_MAX : 0.5f;
+
     // Convert pixel coordinates to normalized device coordinates (NDC)
-    float ndcX = (float(2.0) * pixelx / frameBuffer.width - float(1.0));
-    float ndcY = (float(2.0) * pixely / frameBuffer.height - float(1.0));
+
+    float ndcX = (2.0f * (float(pixelx) + dx) / frameBuffer.width - 1.0f);
+    float ndcY = (2.0f * (float(pixely) + dy) / frameBuffer.height - 1.0f);
 
     // Calculate aspect ratio
-    float aspect = float(1.0) * frameBuffer.width / frameBuffer.height;
+    float aspect = 1.0f * frameBuffer.width / frameBuffer.height;
 
     float viewX, viewY;
 
@@ -288,7 +320,12 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
                 return  updatedReflectivity *1.0f * traceAndShadeWithRay(mirrorRay, depth - 1, curIor) + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
             }
             //add the indirectLighting
-            color = color + indirectLighting(ray, triangle.shared_material->ambient);
+            if(renderParameters->monteCarloEnabled)
+                color = color + indirectLighting(ray, normOut, collisionPoint, depth, curIor, triangle, bc, renderParameters->lights);
+            else
+                color = color + triangle.shared_material->ambient*0.4f;
+            //color = color + color;
+            //color = MonteCarloScattering(collisionPoint, normOut, depth, bc);
 
         }
         else
@@ -382,8 +419,8 @@ float RaytraceRenderWidget::fresnel_schilick(float cosTheta, float ior1, float i
 
 Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 &normal)
 {
-    float u = float((rand()) / static_cast <float> (RAND_MAX));  // Random value between [0, 1]
-    float v = float((rand()) / static_cast <float> (RAND_MAX));  // Random value between [0, 1]
+    float u = float(rand()) / RAND_MAX;  // Random value between [0, 1]
+    float v = float(rand()) / RAND_MAX;  // Random value between [0, 1]
 
     float theta = 2.0f * PI * u;
     float phi = acos(2.0f * v - 1.0f);
@@ -404,15 +441,62 @@ Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 &nor
         direction = rotMat4 * direction;
     }
 
-    return direction;
+    return direction.unit();
 }
 
-Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 ambient){
-    //MonteCarlo sampling for ther indirect lighting
-   /* Homogeneous4 ret;
-    for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
-        Ray mcRay = Sa
+
+Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 normout, Cartesian3 collisinPoint, int depth, float curIor,
+                                                    Triangle& triangle, const Cartesian3 &bc, std::vector<Light*> lights){
+
+    Homogeneous4 ret(0.0,0.0,0.0,1.0);
+/*
+    //NEE
+    for(const auto& light : lights){
+        bool shadowValid = calculateShadowValidity(triangle, collisinPoint, light->GetPositionCenter());
+        if(!shadowValid){
+            ret = ret + triangle.CalculateBlinnPhong(light->GetPositionCenter(), light->GetColor(), bc, shadowValid);
+        }
     }*/
-    return ambient;
+
+    //MonteCarlo sampling for ther indirect lighting
+    //for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
+
+
+    //}
+    Cartesian3 randomRayDir = sampleHemisphereDirection(normout);
+    Ray mcRay = Ray(collisinPoint,randomRayDir);
+    //auto collistionInfo = scene->closestTriangle(mcRay);
+    Homogeneous4 lightColor = traceAndShadeWithRay(mcRay, 1, curIor);
+
+    //ret = ret + triangle.CalculateBlinnPhong(collistionInfo.tri.verts[0], lightColor, bc, false);
+    ret =ret + lightColor;
+    return ret = ret / (float(N_SAMPLES) * (1 / 2 * PI));
+    //return ret;
 }
 
+
+Homogeneous4 RaytraceRenderWidget::MonteCarloScattering(const Cartesian3 &intersectionPoint, const Cartesian3 &normal, int depth, const Cartesian3 &bc )
+{
+    Homogeneous4 indirectLighting(0,0,0,0);
+    // Sample a random direction in the hemisphere oriented by the normal
+       Cartesian3 randomDirection = sampleHemisphereDirection(normal);
+
+       Ray ray(intersectionPoint, randomDirection);
+
+       auto collistionInfo = scene->closestTriangle(ray);
+
+       // If the ray hits something, compute its contribution
+       if (collistionInfo.Valid()) {
+           Cartesian3 interpolatedNormal = (
+               bc.x * collistionInfo.tri.normals[0].Vector() +
+               bc.y * collistionInfo.tri.normals[1].Vector() +
+               bc.z * collistionInfo.tri.normals[2].Vector()
+           ).unit();
+
+           Homogeneous4 diffuseColor = collistionInfo.tri.shared_material->diffuse;
+           float dotProduct = std::max(normal.dot(randomDirection), 0.0f);
+           indirectLighting = diffuseColor * dotProduct;
+       }
+
+       return indirectLighting;  // No contribution if the ray doesn't hit anything
+}

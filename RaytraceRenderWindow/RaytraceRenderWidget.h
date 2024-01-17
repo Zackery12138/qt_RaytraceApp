@@ -87,8 +87,10 @@ class RaytraceRenderWidget : public QOpenGLWidget
 
     Ray reflectRay(Ray& ray, Cartesian3& normOut, Cartesian3 collisionPoint);
     Ray refractRay(Ray& ray, Cartesian3 normOut, Cartesian3 collisionPoint,  float inIOR, float outIOR);
-    Homogeneous4 indirectLighting(Ray ray, Cartesian3 ambient);
+    Homogeneous4 indirectLighting(Ray ray, Cartesian3 normOut, Cartesian3 collisinPoint, int depth, float curIor,
+                                  Triangle& triangle, const Cartesian3 &bc, std::vector<Light*>);
     Cartesian3 sampleHemisphereDirection(const Cartesian3 &normal);
+    Homogeneous4 MonteCarloScattering(const Cartesian3 &intersectionPoint, const Cartesian3 &normal, int depth, const Cartesian3 &bc);
 
 	
 	// mouse-handling
