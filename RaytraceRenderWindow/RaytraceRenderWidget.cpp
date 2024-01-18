@@ -261,6 +261,11 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
     {
         auto collisionPoint = collisionInfo.CollisionPoint;
         auto triangle = collisionInfo.tri;
+
+        // if we hit a light we return early
+        if(triangle.shared_material->isLight())
+            return triangle.shared_material->emissive;
+
         auto bc = triangle.Baricentric(collisionPoint);
         auto normOut = (bc.x * triangle.normals[0] + bc.y * triangle.normals[1] + bc.z * triangle.normals[2]).Vector().unit();
 
@@ -280,7 +285,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
         {
 
             color = Homogeneous4(0.0, 0.0, 0.0, 1.0);
-
+/*
             for (const auto& light : renderParameters->lights)
             {
                 // Apply model view matrix
@@ -291,7 +296,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
 
                 // Calculate Blinn-Phong lighting
                 color = color + triangle.CalculateBlinnPhong(lightPosition, light->GetColor(), bc, shadowValid);
-            }
+            }*/
             //reflection
             if(reflectivity > 0.0f && renderParameters->reflectionEnabled){
                 Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
@@ -316,17 +321,32 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
                 Ray mirrorRay = reflectRay(ray, normOut, collisionPoint);
                 //color = color + updatedReflectivity * traceAndShadeWithRay(mirrorRay, depth - 1, curIor);
                 Ray refractedRay = refractRay(ray, normOut, collisionPoint, curIor, surfaceIOR);
-                //color = color + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
+                //combine reflection and refraction
                 return  updatedReflectivity *1.0f * traceAndShadeWithRay(mirrorRay, depth - 1, curIor) + updatedReTransparency * traceAndShadeWithRay(refractedRay, depth - 1, surfaceIOR);
             }
             //add the indirectLighting
             if(renderParameters->monteCarloEnabled)
-                color = color + indirectLighting(ray, normOut, collisionPoint, depth, curIor, triangle, bc, renderParameters->lights);
+            {
+                for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
+                    Cartesian3 randomDir = sampleHemisphereDirection2(normOut).unit();
+                    Ray randomRay(collisionPoint , randomDir);
+
+                    Homogeneous4 tempColor = traceAndShadeWithRay(randomRay, depth-1, curIor)/*.modulate(triangle.shared_material->ambient)*/;
+                    auto ci = scene->closestTriangle(randomRay);
+                    Homogeneous4 indirectColor(0.,0.,0.,1.);
+                    if(ci.Valid())
+                        indirectColor = triangle.CalculateBlinnPhong(Homogeneous4(ci.CollisionPoint),tempColor,bc,false);
+                    //indirectColor = triangle.CalculateBlinnPhong(ci.tri.verts[0],tempColor,bc,false);
+
+
+
+                    color =color + 2.0f * PI * indirectColor * float(1.0f/ N_SAMPLES);
+                }
+
+            }
+
             else
                 color = color + triangle.shared_material->ambient*0.4f;
-            //color = color + color;
-            //color = MonteCarloScattering(collisionPoint, normOut, depth, bc);
-
         }
         else
         {
@@ -417,7 +437,7 @@ float RaytraceRenderWidget::fresnel_schilick(float cosTheta, float ior1, float i
 }
 
 
-Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 &normal)
+Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 normal)
 {
     float u = float(rand()) / RAND_MAX;  // Random value between [0, 1]
     float v = float(rand()) / RAND_MAX;  // Random value between [0, 1]
@@ -448,7 +468,7 @@ Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 &nor
 Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 normout, Cartesian3 collisinPoint, int depth, float curIor,
                                                     Triangle& triangle, const Cartesian3 &bc, std::vector<Light*> lights){
 
-    Homogeneous4 ret(0.0,0.0,0.0,1.0);
+    Homogeneous4 ret;
 /*
     //NEE
     for(const auto& light : lights){
@@ -466,12 +486,12 @@ Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 normout,
     Cartesian3 randomRayDir = sampleHemisphereDirection(normout);
     Ray mcRay = Ray(collisinPoint,randomRayDir);
     //auto collistionInfo = scene->closestTriangle(mcRay);
-    Homogeneous4 lightColor = traceAndShadeWithRay(mcRay, 1, curIor);
+    Homogeneous4 lightColor = traceAndShadeWithRay(mcRay, depth-1 , curIor);
 
     //ret = ret + triangle.CalculateBlinnPhong(collistionInfo.tri.verts[0], lightColor, bc, false);
     ret =ret + lightColor;
-    return ret = ret / (float(N_SAMPLES) * (1 / 2 * PI));
-    //return ret;
+    //return ret = ret / (float(N_SAMPLES) * (1 / 2 * PI));
+    return ret;
 }
 
 
@@ -499,4 +519,16 @@ Homogeneous4 RaytraceRenderWidget::MonteCarloScattering(const Cartesian3 &inters
        }
 
        return indirectLighting;  // No contribution if the ray doesn't hit anything
+}
+Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection2(const Cartesian3 normal)
+{
+
+float alpha = (static_cast<float>(std::rand()) / RAND_MAX) * PI;
+   float theta = (static_cast<float>(std::rand()) / RAND_MAX) * PI * 2;
+   Cartesian3 direct(std::sin(alpha) * std::cos(theta),std::cos(alpha),std::sin(alpha) * std::sin(theta));
+   float cosine = direct.dot(normal);
+   if (cosine < 0) {
+       direct = direct - 2 * cosine * normal;
+   }
+   return direct;
 }
