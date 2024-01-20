@@ -93,6 +93,7 @@ class RaytraceRenderWidget : public QOpenGLWidget
     Cartesian3 sampleHemisphereDirection2(const Cartesian3 normal);
     Homogeneous4 MonteCarloScattering(const Cartesian3 &intersectionPoint, const Cartesian3 &normal, int depth, const Cartesian3 &bc);
 
+
 	
 	// mouse-handling
 	virtual void mousePressEvent(QMouseEvent *event);

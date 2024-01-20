@@ -23,3 +23,11 @@ Homogeneous4 Light::GetPositionCenter()
     return lightPosition;
 }
 
+Homogeneous4 Light::SampleAreaLight(){
+    float u = -0.5f + (float(rand()) / float(RAND_MAX));
+    float v = -0.5f + (float(rand()) / float(RAND_MAX));
+    Homogeneous4 pointOnPlane = lightPosition + u * tangent1 + v * tangent2;
+    pointOnPlane.w = 1.0f;
+    return pointOnPlane;
+}
+

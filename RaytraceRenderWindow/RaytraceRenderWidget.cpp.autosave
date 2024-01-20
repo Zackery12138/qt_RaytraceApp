@@ -295,7 +295,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
                 //this whill allow us to obtain a random point within a rectangular area centerd at 'lightPosition', with 'tangent1' and 'tangent2' as its
                 //sides. Soft shadows appear now! Ta-da!!!!
                 auto lightPosition = scene->getModelView() * (renderParameters->monteCarloEnabled? light->SampleAreaLight() : light->GetPositionCenter());
-
+                   
                 // Calculate shadow effectiveness
                 bool shadowValid = renderParameters->shadowsEnabled && calculateShadowValidity(triangle, collisionPoint, lightPosition);
 
