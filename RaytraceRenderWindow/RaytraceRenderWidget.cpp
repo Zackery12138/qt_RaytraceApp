@@ -317,7 +317,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
             }
 
             // Fresnel effect
-            if(reflectivity > 0.0f && transparency > 0.0f && renderParameters-> fresnelRendering){
+            if((reflectivity > 0.0f || transparency > 0.0f) && renderParameters-> fresnelRendering){
                 float cosTheta = std::fabs(ray.direction.unit().dot(normOut));
 
                 float rTheta = fresnel_schilick(cosTheta, curIor, surfaceIOR);
@@ -333,7 +333,7 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
             if(renderParameters->monteCarloEnabled)
             {
                 for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
-                    Cartesian3 randomDir = sampleHemisphereDirection2(normOut).unit();
+                    Cartesian3 randomDir = sampleHemisphereDirection(normOut).unit();
                     Ray randomRay(collisionPoint , randomDir);
 
                     Homogeneous4 tempColor = traceAndShadeWithRay(randomRay, depth-1, curIor)/*.modulate(triangle.shared_material->ambient)*/;
@@ -344,11 +344,11 @@ Homogeneous4 RaytraceRenderWidget::traceAndShadeWithRay(Ray ray, int depth, floa
                     //indirectColor = triangle.CalculateBlinnPhong(ci.tri.verts[0],tempColor,bc,false);
 
 
-
                     color =color + 2.0f * PI * indirectColor * float(1.0f/ N_SAMPLES);
                 }
 
             }
+            //if not using monteCarlo indirect light we just add the ambient color
 
             else
                 color = color + triangle.shared_material->ambient*0.4f;
@@ -413,7 +413,7 @@ Ray RaytraceRenderWidget::refractRay(Ray &ray, Cartesian3 normOut, Cartesian3 co
     if(cosi < 0){
         cosi = -cosi;
     }else {
-        // Light exits from the inside, swapping the refractive index, flipping the normal.
+        // Ray exits from the inside, swapping the refractive index, flipping the normal.
         std::swap(etai, etat);
         n = Cartesian3(-normOut.x, -normOut.y, -normOut.z);
     }
@@ -422,7 +422,7 @@ Ray RaytraceRenderWidget::refractRay(Ray &ray, Cartesian3 normOut, Cartesian3 co
     if(k < 0){
         //total internal reflection
         return reflectRay(ray, n, collisionPoint);
-        //std::cout << "total internal reflection , we do nothing cuttently"<<std::endl;
+        //std::cout << "total internal reflection "<<std::endl;
     }
     refractedDirection = (eta * ray.direction.unit() + (eta * cosi - std::sqrt(k)) * n).unit();
 
@@ -442,100 +442,20 @@ float RaytraceRenderWidget::fresnel_schilick(float cosTheta, float ior1, float i
 }
 
 
-Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 normal)
-{
-    float u = float(rand()) / RAND_MAX;  // Random value between [0, 1]
-    float v = float(rand()) / RAND_MAX;  // Random value between [0, 1]
 
-    float theta = 2.0f * PI * u;
-    float phi = acos(2.0f * v - 1.0f);
-
-    // Spherical to Cartesian conversion
-    Cartesian3 direction(
-        sin(phi) * cos(theta),
-        sin(phi) * sin(theta),
-        cos(phi)
-    );
-
-    // Rotate the direction vector so that the z-axis aligns with the normal
-    if (normal.z < 0.99999f) {
-        Cartesian3 axis = normal.cross(Cartesian3(0, 0, 1)).unit();
-        float angle = acos(normal.dot(Cartesian3(0, 0, 1)));
-        Matrix4 rotMat4;
-        rotMat4.SetRotation(axis,angle);
-        direction = rotMat4 * direction;
-    }
-
-    return direction.unit();
-}
-
-
-Homogeneous4 RaytraceRenderWidget::indirectLighting(Ray ray, Cartesian3 normout, Cartesian3 collisinPoint, int depth, float curIor,
-                                                    Triangle& triangle, const Cartesian3 &bc, std::vector<Light*> lights){
-
-    Homogeneous4 ret;
-/*
-    //NEE
-    for(const auto& light : lights){
-        bool shadowValid = calculateShadowValidity(triangle, collisinPoint, light->GetPositionCenter());
-        if(!shadowValid){
-            ret = ret + triangle.CalculateBlinnPhong(light->GetPositionCenter(), light->GetColor(), bc, shadowValid);
-        }
-    }*/
-
-    //MonteCarlo sampling for ther indirect lighting
-    //for(unsigned int i = 0; i < N_SAMPLES; i++){ //current 1 sample per pixel
-
-
-    //}
-    Cartesian3 randomRayDir = sampleHemisphereDirection(normout);
-    Ray mcRay = Ray(collisinPoint,randomRayDir);
-    //auto collistionInfo = scene->closestTriangle(mcRay);
-    Homogeneous4 lightColor = traceAndShadeWithRay(mcRay, depth-1 , curIor);
-
-    //ret = ret + triangle.CalculateBlinnPhong(collistionInfo.tri.verts[0], lightColor, bc, false);
-    ret =ret + lightColor;
-    //return ret = ret / (float(N_SAMPLES) * (1 / 2 * PI));
-    return ret;
-}
-
-
-Homogeneous4 RaytraceRenderWidget::MonteCarloScattering(const Cartesian3 &intersectionPoint, const Cartesian3 &normal, int depth, const Cartesian3 &bc )
-{
-    Homogeneous4 indirectLighting(0,0,0,0);
-    // Sample a random direction in the hemisphere oriented by the normal
-       Cartesian3 randomDirection = sampleHemisphereDirection(normal);
-
-       Ray ray(intersectionPoint, randomDirection);
-
-       auto collistionInfo = scene->closestTriangle(ray);
-
-       // If the ray hits something, compute its contribution
-       if (collistionInfo.Valid()) {
-           Cartesian3 interpolatedNormal = (
-               bc.x * collistionInfo.tri.normals[0].Vector() +
-               bc.y * collistionInfo.tri.normals[1].Vector() +
-               bc.z * collistionInfo.tri.normals[2].Vector()
-           ).unit();
-
-           Homogeneous4 diffuseColor = collistionInfo.tri.shared_material->diffuse;
-           float dotProduct = std::max(normal.dot(randomDirection), 0.0f);
-           indirectLighting = diffuseColor * dotProduct;
-       }
-
-       return indirectLighting;  // No contribution if the ray doesn't hit anything
-}
-Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection2(const Cartesian3 normal)
+Cartesian3 RaytraceRenderWidget::sampleHemisphereDirection(const Cartesian3 normout)
 {
 
-float alpha = (static_cast<float>(std::rand()) / RAND_MAX) * PI;
-   float theta = (static_cast<float>(std::rand()) / RAND_MAX) * PI * 2;
-   Cartesian3 direct(std::sin(alpha) * std::cos(theta),std::cos(alpha),std::sin(alpha) * std::sin(theta));
-   float cosine = direct.dot(normal);
-   if (cosine < 0) {
-       direct = direct - 2 * cosine * normal;
-   }
-   return direct;
+    float alpha = float(rand()) / float(RAND_MAX) * PI;
+    float theta = float(rand()) / float(RAND_MAX) * PI * 2;
+
+    Cartesian3 randomDir(sin(alpha) * cos(theta),cos(alpha),sin(alpha) * sin(theta));
+
+    float dirDotNorm = randomDir.dot(normout);
+    if (dirDotNorm < 0)
+       randomDir = randomDir - 2 * dirDotNorm * normout;
+
+    return randomDir;
 }
 
 
